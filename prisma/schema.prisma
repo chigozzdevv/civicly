@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  walletAddress String    @unique
+  email         String?   @unique
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  points        Int       @default(0)
+  streak        Int       @default(0)
+  lastCheckIn   DateTime?
+  
+  messages      Message[]
+  stakes        Stake[]
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  content   String
+  signature String
+  createdAt DateTime @default(now())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Stake {
+  id         String   @id @default(cuid())
+  amount     Int
+  startDate  DateTime @default(now())
+  endDate    DateTime
+  isActive   Boolean  @default(true)
+  signature  String
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
