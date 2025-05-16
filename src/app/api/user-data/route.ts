@@ -1,4 +1,3 @@
-// src/app/api/user-data/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { User } from '@prisma/client';
@@ -7,7 +6,7 @@ type UserWithRank = User & { leaderboardRank: number };
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, network } = await req.json();
+    const { walletAddress, network = 'solana' } = await req.json();
     
     if (!walletAddress) {
       return NextResponse.json(
@@ -16,23 +15,24 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find or create the user
-    let user = await prisma.user.findUnique({
-      where: { walletAddress },
+    let user = await prisma.user.findFirst({
+      where: {
+        walletAddress,
+        network
+      },
     });
 
-    // If user doesn't exist, create a new one
     if (!user) {
       user = await prisma.user.create({
         data: {
           walletAddress,
+          network,
           points: 0,
           streak: 0,
         },
       });
     }
 
-    // Get user's rank in leaderboard
     const usersWithHigherPoints = await prisma.user.count({
       where: {
         points: {

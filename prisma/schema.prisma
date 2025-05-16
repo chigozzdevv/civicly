@@ -8,17 +8,23 @@ datasource db {
 }
 
 model User {
-  id            String    @id @default(cuid())
-  walletAddress String    @unique
-  email         String?   @unique
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  points        Int       @default(0)
-  streak        Int       @default(0)
-  lastCheckIn   DateTime?
-  
-  messages      Message[]
-  stakes        Stake[]
+  id              String     @id @default(cuid())
+  walletAddress   String     // Primary wallet address (could be either network)
+  network         String     @default("solana") // "ethereum" or "solana"
+  ethereumAddress String?    // Optional separate Ethereum address
+  solanaAddress   String?    // Optional separate Solana address
+  email           String?    
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  points          Int        @default(0)
+  streak          Int        @default(0)
+  lastCheckIn     DateTime?
+  messages        Message[]
+  stakes          Stake[]
+  checkIns        CheckIn[]
+  pointsHistory   Json?      // For storing historical point data
+
+  @@unique([walletAddress, network]) // Ensure uniqueness per network
 }
 
 model Message {
@@ -39,4 +45,14 @@ model Stake {
   signature  String
   userId     String
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model CheckIn {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  points    Int      @default(10)  // Base points earned for this check-in
+  signature String   // Signature from the wallet
+  network   String   // "ethereum" or "solana"
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

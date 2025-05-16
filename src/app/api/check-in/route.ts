@@ -1,3 +1,4 @@
+// app/api/check-in/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { User } from '@prisma/client';
@@ -13,26 +14,27 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find the user
-    const user = await prisma.user.findUnique({
-      where: { walletAddress },
+    let user = await prisma.user.findFirst({
+      where: {
+        walletAddress,
+        network
+      },
     });
 
     if (!user) {
-      // Create user if not found
       const newUser = await prisma.user.create({
         data: {
           walletAddress,
+          network,
           points: 0,
           streak: 0,
         },
       });
       
-      // Continue with the new user
-      return handleCheckin(newUser);
+      return handleCheckin(newUser, signature, message, network);
     }
 
-    return handleCheckin(user);
+    return handleCheckin(user, signature, message, network);
   } catch (error) {
     console.error('Error in check-in API:', error);
     return NextResponse.json(
@@ -44,42 +46,78 @@ export async function POST(req: NextRequest) {
 
 type UserWithRank = User & { leaderboardRank: number };
 
-async function handleCheckin(user: User): Promise<NextResponse<{ user: UserWithRank, pointsEarned: number }>> {
+async function handleCheckin(
+  user: User, 
+  signature: string, 
+  message: string, 
+  network: string
+): Promise<NextResponse<{ user: UserWithRank, pointsEarned: number }>> {
   // Check if already checked in today
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   
-  if (user.lastCheckIn) {
-    const lastCheckIn = new Date(user.lastCheckIn);
-    lastCheckIn.setHours(0, 0, 0, 0);
-    
-    if (today.getTime() === lastCheckIn.getTime()) {
-      return NextResponse.json(
-        { error: 'Already checked in today' },
-        { status: 400 }
-      ) as any; // Type cast needed due to error response not matching return type
+  // Find today's check-in
+  const todayCheckIn = await prisma.checkIn.findFirst({
+    where: {
+      userId: user.id,
+      createdAt: {
+        gte: today,
+        lt: new Date(today.getTime() + 24 * 60 * 60 * 1000) // Next day
+      }
     }
+  });
+  
+  if (todayCheckIn) {
+    return NextResponse.json(
+      { error: 'Already checked in today' },
+      { status: 400 }
+    ) as any;
   }
 
   // Calculate streak
   let newStreak = 1;
-  if (user.lastCheckIn) {
-    const lastCheckIn = new Date(user.lastCheckIn);
+  
+  // Get the most recent check-in
+  const latestCheckIn = await prisma.checkIn.findFirst({
+    where: {
+      userId: user.id,
+    },
+    orderBy: {
+      createdAt: 'desc'
+    }
+  });
+  
+  if (latestCheckIn) {
+    const lastCheckInDate = new Date(latestCheckIn.createdAt);
+    lastCheckInDate.setHours(0, 0, 0, 0);
+    
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(0, 0, 0, 0);
     
-    // Convert dates to match format for comparison
-    const lastCheckInTime = new Date(lastCheckIn).setHours(0, 0, 0, 0);
-    const yesterdayTime = new Date(yesterday).setHours(0, 0, 0, 0);
-    
-    if (lastCheckInTime === yesterdayTime) {
+    if (lastCheckInDate.getTime() === yesterday.getTime()) {
       newStreak = user.streak + 1;
     }
   }
 
   // Calculate points (base 10 * streak multiplier)
-  const pointsEarned = 10 * newStreak;
+  const multiplier = calculateMultiplier(newStreak);
+  const basePoints = 10;
+  const pointsEarned = Math.floor(basePoints * multiplier);
+  
+  // Store the check-in record
+  await prisma.checkIn.create({
+    data: {
+      points: pointsEarned,
+      signature,
+      network,
+      userId: user.id
+    }
+  });
 
+  // Get the previous week's points for history tracking
+  const lastWeekPoints = user.points;
+  
   // Update user
   const updatedUser = await prisma.user.update({
     where: { id: user.id },
@@ -87,6 +125,9 @@ async function handleCheckin(user: User): Promise<NextResponse<{ user: UserWithR
       lastCheckIn: new Date(),
       streak: newStreak,
       points: user.points + pointsEarned,
+      pointsHistory: {
+        lastWeek: lastWeekPoints
+      }
     },
   });
 
@@ -108,4 +149,13 @@ async function handleCheckin(user: User): Promise<NextResponse<{ user: UserWithR
     user: userWithRank,
     pointsEarned
   });
+}
+
+// Helper function to calculate streak multiplier
+function calculateMultiplier(streak: number): number {
+  if (streak <= 1) return 1; // Base multiplier
+  if (streak <= 3) return 1.25; // 2-3 days streak
+  if (streak <= 7) return 1.5; // 4-7 days streak
+  if (streak <= 14) return 1.75; // 8-14 days streak
+  return 2; // 15+ days streak
 }
