@@ -26,7 +26,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <QueryClientProvider client={queryClient}>
           <WagmiProvider config={wagmiConfig}>
-            <ConnectionProvider endpoint="https://api.mainnet-beta.solana.com">
+            <ConnectionProvider endpoint="https://solana-mainnet.g.alchemy.com/v2/yalcht_ptWykKl5EkOMtNxjRzFJGhOhgxfTr6">
               <WalletProvider wallets={[]} autoConnect>
                 <WalletModalProvider>
                   <CivicAuthProvider>

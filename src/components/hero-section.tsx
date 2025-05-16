@@ -1,5 +1,5 @@
 "use client";
-
+import Link from 'next/link';
 import React from 'react';
 import { motion } from 'framer-motion';
 import { Lock } from 'lucide-react';
@@ -70,9 +70,9 @@ export default function HeroSection() {
         
         <motion.div variants={fadeInUp} className="flex justify-center">
           <Button 
-            variant="primary" 
-            size="lg" 
-            href="#try-civicly" 
+            variant="primary"
+            size="lg"
+            href="/login"
             showArrow={true}
           >
             Try Civicly Now
