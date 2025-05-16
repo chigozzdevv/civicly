@@ -36,9 +36,6 @@ export default function Header() {
             <Link href="#features" className="block px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50">
               Features
             </Link>
-            <Link href="#pricing" className="block px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50">
-              Pricing
-            </Link>
             <Link href="#docs" className="block px-4 py-2 text-sm text-neutral-700 hover:bg-neutral-50">
               Documentation
             </Link>
@@ -53,7 +50,7 @@ export default function Header() {
         </Link>
         
         <Link 
-          href="/get-started" 
+          href="/login" 
           className="bg-neutral-50 border border-neutral-200 rounded-md px-3 py-2 text-neutral-700 hover:bg-neutral-100 transition-colors text-sm md:text-base"
         >
           Get started
