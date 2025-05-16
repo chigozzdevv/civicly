@@ -21,12 +21,15 @@ const wagmiConfig = createConfig({
 const queryClient = new QueryClient();
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
+  const heliusApiKey = process.env.NEXT_PUBLIC_HELIUS_API_KEY;
+  const endpoint = `https://mainnet.helius-rpc.com/?api-key=${heliusApiKey}`;
+
   return (
     <html lang="en">
       <body>
         <QueryClientProvider client={queryClient}>
           <WagmiProvider config={wagmiConfig}>
-            <ConnectionProvider endpoint="https://solana-mainnet.g.alchemy.com/v2/yalcht_ptWykKl5EkOMtNxjRzFJGhOhgxfTr6">
+            <ConnectionProvider endpoint={endpoint}>
               <WalletProvider wallets={[]} autoConnect>
                 <WalletModalProvider>
                   <CivicAuthProvider>
