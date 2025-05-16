@@ -3,7 +3,7 @@ import prisma from '@/lib/prisma';
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, amount, duration, signature } = await req.json();
+    const { walletAddress, amount, duration, signature, network = 'solana' } = await req.json();
     
     if (!walletAddress || !amount || !duration || !signature) {
       return NextResponse.json(
@@ -12,9 +12,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Find the user
+    // Find the user using the compound unique constraint
     const user = await prisma.user.findUnique({
-      where: { walletAddress },
+      where: {
+        walletAddress_network: {
+          walletAddress,
+          network
+        }
+      },
     });
 
     if (!user) {
@@ -54,7 +59,22 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    return NextResponse.json({ stake, user: updatedUser });
+    // Get user's rank in leaderboard
+    const usersWithHigherPoints = await prisma.user.count({
+      where: {
+        points: {
+          gt: updatedUser.points,
+        },
+      },
+    });
+
+    // Return user with leaderboard rank
+    const userWithRank = {
+      ...updatedUser,
+      leaderboardRank: usersWithHigherPoints + 1,
+    };
+
+    return NextResponse.json({ stake, user: userWithRank });
   } catch (error) {
     console.error('Error in stake API:', error);
     return NextResponse.json(
@@ -66,7 +86,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const { walletAddress, stakeId, signature } = await req.json();
+    const { walletAddress, stakeId, signature, network = 'solana' } = await req.json();
     
     if (!walletAddress || !stakeId || !signature) {
       return NextResponse.json(
@@ -75,9 +95,14 @@ export async function PUT(req: NextRequest) {
       );
     }
 
-    // Find the user
+    // Find the user using the compound unique constraint
     const user = await prisma.user.findUnique({
-      where: { walletAddress },
+      where: {
+        walletAddress_network: {
+          walletAddress,
+          network
+        }
+      },
     });
 
     if (!user) {
@@ -127,8 +152,23 @@ export async function PUT(req: NextRequest) {
       },
     });
 
+    // Get user's rank in leaderboard
+    const usersWithHigherPoints = await prisma.user.count({
+      where: {
+        points: {
+          gt: updatedUser.points,
+        },
+      },
+    });
+
+    // Return user with leaderboard rank
+    const userWithRank = {
+      ...updatedUser,
+      leaderboardRank: usersWithHigherPoints + 1,
+    };
+
     return NextResponse.json({ 
-      user: updatedUser,
+      user: userWithRank,
       unstaked: stake.amount,
       reward
     });
@@ -145,6 +185,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const walletAddress = searchParams.get('walletAddress');
+    const network = searchParams.get('network') || 'solana';
     
     if (!walletAddress) {
       return NextResponse.json(
@@ -153,9 +194,14 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Find the user
+    // Find the user using the compound unique constraint
     const user = await prisma.user.findUnique({
-      where: { walletAddress },
+      where: {
+        walletAddress_network: {
+          walletAddress,
+          network
+        }
+      },
     });
 
     if (!user) {

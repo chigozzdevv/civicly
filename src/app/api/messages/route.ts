@@ -15,7 +15,7 @@ export async function GET() {
         },
       },
     });
-
+    
     return NextResponse.json({ messages });
   } catch (error) {
     console.error('Error in messages API:', error);
@@ -28,7 +28,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { walletAddress, content, signature } = await req.json();
+    const { walletAddress, content, signature, network = 'solana' } = await req.json();
     
     if (!walletAddress || !content || !signature) {
       return NextResponse.json(
@@ -36,19 +36,24 @@ export async function POST(req: NextRequest) {
         { status: 400 }
       );
     }
-
-    // Find the user
+    
+    // Find the user using the compound unique constraint
     const user = await prisma.user.findUnique({
-      where: { walletAddress },
+      where: {
+        walletAddress_network: {
+          walletAddress,
+          network
+        }
+      },
     });
-
+    
     if (!user) {
       return NextResponse.json(
         { error: 'User not found' },
         { status: 404 }
       );
     }
-
+    
     // Create message
     const message = await prisma.message.create({
       data: {
@@ -57,7 +62,7 @@ export async function POST(req: NextRequest) {
         userId: user.id,
       },
     });
-
+    
     return NextResponse.json({ message });
   } catch (error) {
     console.error('Error in messages API:', error);

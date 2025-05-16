@@ -4,7 +4,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useUser } from '@civic/auth-web3/react';
 import { userHasWallet } from '@civic/auth-web3';
-import { useWallet, useConnection } from '@solana/wallet-adapter-react';
+import { useConnection } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction as SolanaTransaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { useAccount, useBalance as useEthBalance, useSendTransaction } from 'wagmi';
 import { parseEther } from 'viem';
@@ -40,7 +40,6 @@ export default function WalletPage() {
   
   const [selectedNetwork, setSelectedNetwork] = useState<'ethereum' | 'solana'>(defaultNetwork);
   const userContext = useUser();
-  const { publicKey, sendTransaction: sendSolTransaction } = useWallet();
   const { connection } = useConnection();
   const { address: ethAddress } = useAccount();
   const ethBalance = useEthBalance({ address: ethAddress });
@@ -62,7 +61,7 @@ export default function WalletPage() {
   const [refreshing, setRefreshing] = useState(false);
   
   const isAuthenticated = !!userContext.user;
-  const hasWallet = userContext && userHasWallet(userContext);
+  const hasWallet = userContext.user && userHasWallet(userContext);
 
   // Use the fetched points instead of relying only on context
   const points = userPoints || (typeof userContext.user?.points === 'number' ? userContext.user.points : 0);
@@ -80,21 +79,15 @@ export default function WalletPage() {
 
   // Get wallet address safely based on selected network
   const getWalletAddress = useCallback(() => {
-    if (selectedNetwork === 'ethereum') {
-      if ('ethereum' in userContext) {
-        return userContext.ethereum.address;
-      } else if (ethAddress) {
-        return ethAddress;
-      }
-    } else { // solana
-      if ('solana' in userContext) {
-        return userContext.solana.address;
-      } else if (publicKey) {
-        return publicKey.toString();
-      }
+    if (!userHasWallet(userContext)) return '';
+    
+    if (selectedNetwork === 'ethereum' && 'ethereum' in userContext) {
+      return userContext.ethereum.address;
+    } else if (selectedNetwork === 'solana' && 'solana' in userContext) {
+      return userContext.solana.address;
     }
     return '';
-  }, [selectedNetwork, userContext, ethAddress, publicKey]);
+  }, [selectedNetwork, userContext]);
 
   const walletAddress = getWalletAddress();
 
@@ -150,39 +143,66 @@ export default function WalletPage() {
     createWalletIfNeeded();
   }, [userContext]);
 
+  // Update wallet balance using Civic Auth approach
   useEffect(() => {
-    const getWalletBalance = async () => {
+    const fetchSolanaBalance = async () => {
       if (!hasWallet) return;
       
       setLoading(true);
       try {
-        if (selectedNetwork === 'ethereum') {
-          if (ethBalance.data) {
-            const formatted = ethBalance.data.formatted;
-            setBalance(`${parseFloat(formatted).toFixed(4)} ETH`);
-          } else if ('ethereum' in userContext) {
-            setBalance("0.00 ETH");
-          }
-        } else {
-          if ('solana' in userContext && userContext.solana?.wallet?.publicKey && connection) {
-            const balanceInLamports = await connection.getBalance(userContext.solana.wallet.publicKey);
+        if (userHasWallet(userContext) && 'solana' in userContext && connection) {
+          // Direct blockchain query - not using the user-data API
+          try {
+            // Convert the address string to a PublicKey object
+            const pubKey = new PublicKey(userContext.solana.address);
+            console.log("Fetching balance for Solana address:", pubKey.toString());
+            
+            const balanceInLamports = await connection.getBalance(pubKey);
+            console.log("Raw lamports balance:", balanceInLamports);
+            
             const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
+            console.log("Converted SOL balance:", balanceInSol);
+            
             setBalance(`${balanceInSol.toFixed(4)} SOL`);
-          } else if (publicKey && connection) {
-            const balanceInLamports = await connection.getBalance(publicKey);
-            const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
-            setBalance(`${balanceInSol.toFixed(4)} SOL`);
+          } catch (balanceError) {
+            console.error("Error fetching Solana balance:", balanceError);
+            // Keep existing balance or set to 0
+            setBalance("0.0000 SOL");
           }
         }
       } catch (error) {
-        console.error("Error fetching balance:", error);
+        console.error("Error in balance fetch process:", error);
       } finally {
         setLoading(false);
       }
     };
     
-    getWalletBalance();
-  }, [hasWallet, userContext, connection, publicKey, ethAddress, ethBalance, selectedNetwork]);
+    const fetchEthereumBalance = async () => {
+      if (!hasWallet) return;
+      
+      setLoading(true);
+      try {
+        if (userHasWallet(userContext) && 'ethereum' in userContext) {
+          if (ethBalance.data) {
+            const formatted = ethBalance.data.formatted;
+            setBalance(`${parseFloat(formatted).toFixed(4)} ETH`);
+          } else {
+            setBalance("0.0000 ETH");
+          }
+        }
+      } catch (error) {
+        console.error("Error fetching ETH balance:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    if (selectedNetwork === 'ethereum') {
+      fetchEthereumBalance();
+    } else {
+      fetchSolanaBalance();
+    }
+  }, [hasWallet, userContext, connection, ethBalance, selectedNetwork]);
 
   // Get shortened wallet address for display
   const getShortAddress = () => {
@@ -201,6 +221,28 @@ export default function WalletPage() {
 
   // Handle refresh button click
   const handleRefresh = () => {
+    // Force refresh the balance from the blockchain
+    if (selectedNetwork === 'ethereum') {
+      if (userHasWallet(userContext) && 'ethereum' in userContext) {
+        ethBalance.refetch?.();
+      }
+    } else {
+      if (userHasWallet(userContext) && 'solana' in userContext && connection) {
+        // Trigger a fresh balance fetch from Solana blockchain
+        const pubKey = new PublicKey(userContext.solana.address);
+        setLoading(true);
+        connection.getBalance(pubKey).then(balanceInLamports => {
+          const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
+          setBalance(`${balanceInSol.toFixed(4)} SOL`);
+          setLoading(false);
+        }).catch(error => {
+          console.error("Error refreshing Solana balance:", error);
+          setLoading(false);
+        });
+      }
+    }
+    
+    // Also refresh user data for points
     fetchUserData();
   };
 
@@ -217,7 +259,7 @@ export default function WalletPage() {
     try {
       if (selectedNetwork === 'ethereum') {
         // Ethereum transaction
-        if ('ethereum' in userContext && sendTransactionAsync) {
+        if (userHasWallet(userContext) && 'ethereum' in userContext && sendTransactionAsync) {
           try {
             const hash = await sendTransactionAsync({
               to: recipientAddress as `0x${string}`,
@@ -250,17 +292,17 @@ export default function WalletPage() {
         }
       } else {
         // Solana transaction
-        if ('solana' in userContext && connection) {
+        if (userHasWallet(userContext) && 'solana' in userContext && connection) {
           const lamports = parseFloat(amount) * LAMPORTS_PER_SOL;
-          
-          // Make sure we have a valid wallet publicKey
-          if (!userContext.solana.wallet.publicKey) {
-            throw new Error('Wallet public key not found');
-          }
           
           try {
             // Create a valid PublicKey for recipient
             const recipientPubkey = new PublicKey(recipientAddress);
+            
+            // Using the publicKey from the wallet object
+            if (!userContext.solana.wallet.publicKey) {
+              throw new Error('Wallet public key not found');
+            }
             
             const transaction = new SolanaTransaction().add(
               SystemProgram.transfer({
@@ -270,8 +312,21 @@ export default function WalletPage() {
               })
             );
             
-            // Send transaction and get the signature string
-            const signature = await sendSolTransaction(transaction, connection);
+            // Fix for 'emit' error - Make sure to wait for the transaction to be confirmed
+            console.log("Preparing to send Solana transaction...");
+            
+            // Using the wallet's method with explicit parameters
+            const { sendTransaction } = userContext.solana.wallet;
+            
+            if (typeof sendTransaction !== 'function') {
+              throw new Error('sendTransaction is not a function in this wallet');
+            }
+            
+            console.log("Sending transaction via wallet...");
+            const signature = await sendTransaction(transaction, connection, {
+              skipPreflight: false,
+              preflightCommitment: 'confirmed'
+            });
             
             console.log('Solana transaction sent:', signature);
             
@@ -293,9 +348,11 @@ export default function WalletPage() {
             setRecipientAddress('');
             setAmount('');
           } catch (e) {
-            // Handle invalid Solana address
-            setSendError('Invalid Solana address');
+            console.error("Solana transaction error:", e);
+            setSendError(e instanceof Error ? e.message : 'Transaction failed');
           }
+        } else {
+          setSendError('Solana wallet not ready');
         }
       }
     } catch (error) {
@@ -320,7 +377,7 @@ export default function WalletPage() {
         selectedNetwork={selectedNetwork} 
         onNetworkChange={handleNetworkChange}
       >
-        <div className="flex flex-col items-center justify-center h-64">
+        <div className="flex flex-col items-center justify-center h-64 mt-16 md:mt-0">
           <div className="p-6 bg-neutral-50 rounded-lg border border-neutral-200 max-w-md w-full">
             <div className="flex flex-col items-center text-center">
               <WalletIcon className="h-12 w-12 text-orange-500 mb-4" />
@@ -342,7 +399,8 @@ export default function WalletPage() {
       selectedNetwork={selectedNetwork} 
       onNetworkChange={handleNetworkChange}
     >
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      {/* Added top margin for mobile to prevent nav overlap */}
+      <div className="max-w-4xl mx-auto px-4 py-6 mt-16 md:mt-0">
         {/* Wallet Overview Card */}
         <div className="bg-white rounded-lg shadow-sm border border-neutral-200 overflow-hidden mb-6">
           <div className="flex items-center justify-between p-5 border-b border-neutral-200">
@@ -352,9 +410,9 @@ export default function WalletPage() {
                 onClick={handleRefresh}
                 className="p-2 rounded-md hover:bg-neutral-100 text-neutral-500 transition-colors"
                 title="Refresh data"
-                disabled={refreshing}
+                disabled={refreshing || loading}
               >
-                <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin text-orange-500' : ''}`} />
+                <RefreshCw className={`h-4 w-4 ${(refreshing || loading) ? 'animate-spin text-orange-500' : ''}`} />
               </button>
               <div className="px-3 py-1 rounded-full bg-neutral-100 flex items-center text-sm">
                 <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
