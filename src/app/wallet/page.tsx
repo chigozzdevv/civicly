@@ -46,6 +46,7 @@ export default function WalletPage() {
   const { sendTransactionAsync } = useSendTransaction();
   
   const [balance, setBalance] = useState<string>("0");
+  const [rawBalance, setRawBalance] = useState<number>(0); // Store raw balance for calculations
   const [transactions, setTransactions] = useState<TxRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSendModal, setShowSendModal] = useState(false);
@@ -151,23 +152,31 @@ export default function WalletPage() {
       setLoading(true);
       try {
         if (userHasWallet(userContext) && 'solana' in userContext && connection) {
-          // Direct blockchain query - not using the user-data API
           try {
-            // Convert the address string to a PublicKey object
-            const pubKey = new PublicKey(userContext.solana.address);
-            console.log("Fetching balance for Solana address:", pubKey.toString());
-            
-            const balanceInLamports = await connection.getBalance(pubKey);
-            console.log("Raw lamports balance:", balanceInLamports);
-            
-            const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
-            console.log("Converted SOL balance:", balanceInSol);
-            
-            setBalance(`${balanceInSol.toFixed(4)} SOL`);
+            // Following Civic docs exactly: use wallet public key if available
+            if (userContext.solana.wallet.publicKey) {
+              console.log("Fetching balance for Solana address:", userContext.solana.wallet.publicKey.toString());
+              const balanceInLamports = await connection.getBalance(userContext.solana.wallet.publicKey);
+              const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
+              
+              // Store both formatted and raw balances
+              setBalance(`${balanceInSol.toFixed(4)} SOL`);
+              setRawBalance(balanceInLamports);
+            } else {
+              // Fallback to address string if publicKey not available
+              const pubKey = new PublicKey(userContext.solana.address);
+              console.log("Fetching balance using address:", pubKey.toString());
+              const balanceInLamports = await connection.getBalance(pubKey);
+              const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
+              
+              // Store both formatted and raw balances
+              setBalance(`${balanceInSol.toFixed(4)} SOL`);
+              setRawBalance(balanceInLamports);
+            }
           } catch (balanceError) {
             console.error("Error fetching Solana balance:", balanceError);
-            // Keep existing balance or set to 0
             setBalance("0.0000 SOL");
+            setRawBalance(0);
           }
         }
       } catch (error) {
@@ -186,8 +195,11 @@ export default function WalletPage() {
           if (ethBalance.data) {
             const formatted = ethBalance.data.formatted;
             setBalance(`${parseFloat(formatted).toFixed(4)} ETH`);
+            // Store raw balance for Ethereum too
+            setRawBalance(Number(ethBalance.data.value));
           } else {
             setBalance("0.0000 ETH");
+            setRawBalance(0);
           }
         }
       } catch (error) {
@@ -221,29 +233,62 @@ export default function WalletPage() {
 
   // Handle refresh button click
   const handleRefresh = () => {
-    // Force refresh the balance from the blockchain
     if (selectedNetwork === 'ethereum') {
       if (userHasWallet(userContext) && 'ethereum' in userContext) {
         ethBalance.refetch?.();
       }
     } else {
       if (userHasWallet(userContext) && 'solana' in userContext && connection) {
-        // Trigger a fresh balance fetch from Solana blockchain
-        const pubKey = new PublicKey(userContext.solana.address);
         setLoading(true);
-        connection.getBalance(pubKey).then(balanceInLamports => {
-          const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
-          setBalance(`${balanceInSol.toFixed(4)} SOL`);
+        
+        if (userContext.solana.wallet.publicKey) {
+          connection.getBalance(userContext.solana.wallet.publicKey)
+            .then(balanceInLamports => {
+              const balanceInSol = balanceInLamports / LAMPORTS_PER_SOL;
+              setBalance(`${balanceInSol.toFixed(4)} SOL`);
+              setRawBalance(balanceInLamports);
+            })
+            .catch(error => {
+              console.error("Error refreshing Solana balance:", error);
+            })
+            .finally(() => {
+              setLoading(false);
+            });
+        } else {
           setLoading(false);
-        }).catch(error => {
-          console.error("Error refreshing Solana balance:", error);
-          setLoading(false);
-        });
+        }
       }
     }
     
     // Also refresh user data for points
     fetchUserData();
+  };
+
+  // Function to estimate Solana transaction fee
+  const estimateSolanaFee = async (transaction: SolanaTransaction): Promise<number> => {
+    try {
+      // Default minimum fee for Solana transactions (this is an approximation)
+      const DEFAULT_FEE = 5000; // 0.000005 SOL
+      
+      if (connection) {
+        // Try to get fee estimate from connection
+        try {
+          const { feeCalculator } = await connection.getRecentBlockhash();
+          if (feeCalculator) {
+            return feeCalculator.lamportsPerSignature;
+          }
+        } catch (error) {
+          console.warn("Could not get fee calculator:", error);
+        }
+      }
+      
+      // Return default fee if we couldn't get a calculation
+      return DEFAULT_FEE;
+      
+    } catch (error) {
+      console.error("Error estimating fee:", error);
+      return 5000; // Default 0.000005 SOL if calculation fails
+    }
   };
 
   // Handle send transaction
@@ -261,9 +306,23 @@ export default function WalletPage() {
         // Ethereum transaction
         if (userHasWallet(userContext) && 'ethereum' in userContext && sendTransactionAsync) {
           try {
+            const amountInWei = parseEther(amount);
+            
+            // Check if user has enough balance (including estimated gas)
+            const estimatedGas = BigInt(21000); // Basic ETH transfer cost
+            const gasPriceWei = BigInt(15000000000); // 15 gwei - this could be fetched dynamically
+            const estimatedFee = estimatedGas * gasPriceWei;
+            const totalCost = amountInWei + estimatedFee;
+            
+            if (BigInt(rawBalance) < totalCost) {
+              setSendError(`Insufficient funds for this transaction. You need approximately ${(Number(totalCost) / 1e18).toFixed(6)} ETH (including gas).`);
+              setIsSending(false);
+              return;
+            }
+            
             const hash = await sendTransactionAsync({
               to: recipientAddress as `0x${string}`,
-              value: parseEther(amount),
+              value: amountInWei,
             });
             
             console.log('Transaction sent:', hash);
@@ -288,80 +347,131 @@ export default function WalletPage() {
             setSendError(txError instanceof Error ? txError.message : 'Transaction failed');
           }
         } else {
-          setSendError('Wallet not ready');
+          setSendError('Ethereum wallet not ready');
         }
       } else {
         // Solana transaction
         if (userHasWallet(userContext) && 'solana' in userContext && connection) {
-          const lamports = parseFloat(amount) * LAMPORTS_PER_SOL;
-          
           try {
-            // Create a valid PublicKey for recipient
-            const recipientPubkey = new PublicKey(recipientAddress);
-            
-            // Using the publicKey from the wallet object
-            if (!userContext.solana.wallet.publicKey) {
-              throw new Error('Wallet public key not found');
+            // Make sure wallet is ready
+            if (!userContext.solana.wallet || !userContext.solana.wallet.publicKey) {
+              throw new Error('Wallet not ready');
             }
             
-            const transaction = new SolanaTransaction().add(
+            // Get the sender's public key
+            const fromPubkey = userContext.solana.wallet.publicKey;
+            
+            // Parse the recipient address
+            let toPubkey: PublicKey;
+            try {
+              toPubkey = new PublicKey(recipientAddress);
+            } catch (e) {
+              setSendError('Invalid Solana address');
+              setIsSending(false);
+              return;
+            }
+            
+            // Calculate the amount in lamports
+            const lamports = Math.floor(parseFloat(amount) * LAMPORTS_PER_SOL);
+            if (isNaN(lamports) || lamports <= 0) {
+              setSendError('Invalid amount');
+              setIsSending(false);
+              return;
+            }
+            
+            // Create transaction
+            const transaction = new SolanaTransaction();
+            
+            // Add transfer instruction
+            transaction.add(
               SystemProgram.transfer({
-                fromPubkey: userContext.solana.wallet.publicKey,
-                toPubkey: recipientPubkey,
-                lamports: Math.floor(lamports),
+                fromPubkey: fromPubkey,
+                toPubkey: toPubkey,
+                lamports: lamports
               })
             );
             
-            // Fix for 'emit' error - Make sure to wait for the transaction to be confirmed
-            console.log("Preparing to send Solana transaction...");
+            // Get latest blockhash for transaction
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = fromPubkey;
             
-            // Using the wallet's method with explicit parameters
-            const { sendTransaction } = userContext.solana.wallet;
+            // Estimate fee for this transaction
+            const estimatedFee = await estimateSolanaFee(transaction);
             
-            if (typeof sendTransaction !== 'function') {
-              throw new Error('sendTransaction is not a function in this wallet');
+            // Check if user has enough funds for amount + fee
+            if (rawBalance < (lamports + estimatedFee)) {
+              setSendError(`Insufficient funds for this transaction. You need approximately ${((lamports + estimatedFee) / LAMPORTS_PER_SOL).toFixed(6)} SOL (including fees).`);
+              setIsSending(false);
+              return;
             }
             
-            console.log("Sending transaction via wallet...");
-            const signature = await sendTransaction(transaction, connection, {
-              skipPreflight: false,
-              preflightCommitment: 'confirmed'
+            console.log('Transaction prepared:', {
+              from: fromPubkey.toString(),
+              to: toPubkey.toString(),
+              lamports: lamports,
+              blockhash: blockhash,
+              estimatedFee: estimatedFee
             });
             
-            console.log('Solana transaction sent:', signature);
-            
-            // Add to transactions if signature is not null
-            if (signature) {
-              setTransactions(prev => [
-                {
-                  hash: signature,
-                  type: "send",
-                  amount: `${amount} SOL`,
-                  timestamp: Date.now(),
-                  status: "pending"
-                },
-                ...prev
-              ]);
+            try {
+              const { sendTransaction } = userContext.solana.wallet;
+              
+              // Call with proper parameters
+              const signature = await sendTransaction(transaction, connection, {
+                skipPreflight: false,
+                preflightCommitment: 'confirmed'
+              });
+              
+              console.log('Transaction sent with signature:', signature);
+              
+              if (signature) {
+                setTransactions(prev => [
+                  {
+                    hash: signature,
+                    type: "send",
+                    amount: `${amount} SOL`,
+                    timestamp: Date.now(),
+                    status: "pending"
+                  },
+                  ...prev
+                ]);
+                
+                setShowSendModal(false);
+                setRecipientAddress('');
+                setAmount('');
+              }
+            } catch (e) {
+              // Properly handle the error with type safety
+              const errorMessage = e instanceof Error 
+                ? e.message 
+                : (typeof e === 'string' 
+                  ? e 
+                  : 'Transaction failed');
+              
+              console.error('Error sending transaction:', errorMessage);
+              
+              if (errorMessage.includes('insufficient funds')) {
+                setSendError('Insufficient funds for this transaction');
+              } else if (errorMessage.includes('emit')) {
+                setSendError('Network error: Please try again later');
+              } else {
+                setSendError(errorMessage);
+              }
             }
-            
-            setShowSendModal(false);
-            setRecipientAddress('');
-            setAmount('');
           } catch (e) {
-            console.error("Solana transaction error:", e);
-            setSendError(e instanceof Error ? e.message : 'Transaction failed');
+            const errorMessage = e instanceof Error ? e.message : 'Transaction preparation failed';
+            console.error("Transaction error:", errorMessage);
+            setSendError(errorMessage);
           }
         } else {
           setSendError('Solana wallet not ready');
         }
       }
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Transaction failed';
       console.error("Error sending transaction:", error);
-      if (error instanceof Error) {
-        setSendError(error.message);
-      } else {
-        setSendError('Transaction failed');
-      }
+      setSendError(errorMessage);
     } finally {
       setIsSending(false);
     }
@@ -600,6 +710,9 @@ export default function WalletPage() {
                       {selectedNetwork === 'ethereum' ? 'ETH' : 'SOL'}
                     </div>
                   </div>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    Available: {balance}
+                  </p>
                 </div>
                 
                 {sendError && (
