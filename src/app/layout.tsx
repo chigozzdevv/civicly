@@ -1,22 +1,43 @@
-import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
-import './globals.css';
+"use client";
 
-const inter = Inter({ subsets: ['latin'] });
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { WagmiProvider, createConfig, http } from "wagmi";
+import { embeddedWallet } from "@civic/auth-web3/wagmi";
+import { mainnet } from "wagmi/chains";
+import { CivicAuthProvider } from "@civic/auth-web3/nextjs";
+import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
+import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
+import "@solana/wallet-adapter-react-ui/styles.css";
+import "./globals.css";
 
-export const metadata: Metadata = {
-  title: 'Civicly - The best way to experience civic auth',
-  description: 'Civicly helps you see civic auths in action in the real world and covers all your Web3 auth needs.',
-};
+const wagmiConfig = createConfig({
+  chains: [mainnet],
+  transports: {
+    [mainnet.id]: http(),
+  },
+  connectors: [embeddedWallet()],
+});
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const queryClient = new QueryClient();
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={inter.className}>{children}</body>
+      <body>
+        <QueryClientProvider client={queryClient}>
+          <WagmiProvider config={wagmiConfig}>
+            <ConnectionProvider endpoint="https://api.devnet.solana.com">
+              <WalletProvider wallets={[]} autoConnect>
+                <WalletModalProvider>
+                  <CivicAuthProvider>
+                    {children}
+                  </CivicAuthProvider>
+                </WalletModalProvider>
+              </WalletProvider>
+            </ConnectionProvider>
+          </WagmiProvider>
+        </QueryClientProvider>
+      </body>
     </html>
   );
 }

@@ -6,7 +6,8 @@ import { motion } from 'framer-motion';
 import { Coins, LogOut, Wallet, CalendarCheck, MessageSquare, Trophy, CheckCircle, CircleAlert, Clock, RefreshCw } from 'lucide-react';
 import Link from 'next/link';
 import { useUser } from '@civic/auth-web3/react';
-import { useWallet } from '@solana/wallet-adapter-react';
+import { userHasWallet } from '@civic/auth-web3';
+import { useWallet, useConnection } from '@solana/wallet-adapter-react';
 import { TextEncoder } from 'util';
 
 interface UserData {
@@ -19,14 +20,17 @@ export default function DashboardPage() {
   const router = useRouter();
   const userContext = useUser();
   const { publicKey, signMessage } = useWallet();
+  const { connection } = useConnection();
   
   const [userData, setUserData] = useState<UserData | null>(null);
   const [checkedInToday, setCheckedInToday] = useState(false);
   const [isCheckingIn, setIsCheckingIn] = useState(false);
   const [pointsEarned, setPointsEarned] = useState(0);
+  const [isWalletCreating, setIsWalletCreating] = useState(false);
   
   const isAuthenticated = !!userContext.user;
-  
+  const hasWallet = userContext && userHasWallet(userContext);
+
   // Protect route
   useEffect(() => {
     if (!isAuthenticated) {
@@ -34,10 +38,42 @@ export default function DashboardPage() {
     }
   }, [isAuthenticated, router]);
 
+  // Create wallet if needed
+  useEffect(() => {
+    const createWalletIfNeeded = async () => {
+      if (userContext.user && !userHasWallet(userContext) && !isWalletCreating) {
+        try {
+          setIsWalletCreating(true);
+          // Only call createWallet if it exists (on NewWeb3UserContext)
+          if ('createWallet' in userContext) {
+            await userContext.createWallet();
+            console.log("Wallet created successfully");
+          }
+        } catch (error) {
+          console.error("Error creating wallet:", error);
+        } finally {
+          setIsWalletCreating(false);
+        }
+      }
+    };
+    
+    createWalletIfNeeded();
+  }, [userContext, isWalletCreating]);
+
   // Fetch user data
   useEffect(() => {
     const fetchUserData = async () => {
-      if (!publicKey) return;
+      if (!hasWallet) return;
+      
+      // Safely access the wallet address based on type
+      let walletAddress;
+      if (hasWallet && 'solana' in userContext) {
+        walletAddress = userContext.solana.address;
+      } else if (publicKey) {
+        walletAddress = publicKey.toString();
+      } else {
+        return; // No wallet address available
+      }
       
       try {
         const response = await fetch(`/api/auth`, {
@@ -46,7 +82,7 @@ export default function DashboardPage() {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            walletAddress: publicKey.toString(),
+            walletAddress: walletAddress,
           }),
         });
         
@@ -74,20 +110,32 @@ export default function DashboardPage() {
     };
     
     fetchUserData();
-  }, [publicKey]);
+  }, [hasWallet, userContext, publicKey]);
 
+  // Handle daily check in
   const handleDailyCheckIn = async () => {
-    if (!publicKey || !signMessage || checkedInToday) return;
+    if (!hasWallet) return;
+    
+    let signature;
+    let walletAddress;
     
     setIsCheckingIn(true);
     try {
       // Create message to sign
       const today = new Date().toISOString();
       const message = `Civicly daily check-in: ${today}`;
-      
-      // Sign the message with the wallet
       const encodedMessage = new TextEncoder().encode(message);
-      const signature = await signMessage(encodedMessage);
+      
+      // Sign with the appropriate wallet (Solana embedded or adapter)
+      if ('solana' in userContext) {
+        signature = await userContext.solana.wallet.signMessage(encodedMessage);
+        walletAddress = userContext.solana.address;
+      } else if (signMessage && publicKey) {
+        signature = await signMessage(encodedMessage);
+        walletAddress = publicKey.toString();
+      } else {
+        throw new Error("No wallet available for signing");
+      }
       
       // Send to backend
       const response = await fetch('/api/check-in', {
@@ -96,7 +144,7 @@ export default function DashboardPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          walletAddress: publicKey.toString(),
+          walletAddress: walletAddress,
           signature: Buffer.from(signature).toString('base64'),
           message,
         }),
@@ -128,6 +176,18 @@ export default function DashboardPage() {
   if (!isAuthenticated) {
     return null; 
   }
+
+  // Get wallet address safely
+  const getWalletAddress = () => {
+    if (hasWallet && 'solana' in userContext) {
+      return userContext.solana.address;
+    } else if (publicKey) {
+      return publicKey.toString();
+    }
+    return 'No wallet';
+  };
+
+  const walletAddress = getWalletAddress();
 
   return (
     <div className="min-h-screen bg-neutral-50 flex">
@@ -224,104 +284,120 @@ export default function DashboardPage() {
           >
             <h1 className="text-2xl md:text-3xl font-bold text-neutral-900 mb-6">Daily Check-in</h1>
             
-            <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden mb-8">
-              <div className="p-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-lg font-medium text-neutral-900">Welcome back!</h2>
-                    <p className="text-neutral-600">Check in daily to earn points and climb the leaderboard</p>
-                  </div>
-                  
-                  <div className="mt-4 md:mt-0 flex items-center space-x-2 text-sm">
-                    <div className="bg-neutral-100 px-3 py-1 rounded-full flex items-center">
-                      <Wallet className="h-4 w-4 mr-1 text-neutral-600" />
-                      <span className="text-neutral-800">
-                        {publicKey ? `${publicKey.toString().slice(0, 4)}...${publicKey.toString().slice(-4)}` : 'No wallet'}
-                      </span>
+            {!hasWallet && !isWalletCreating && (
+              <div className="bg-white rounded-xl shadow-sm border border-neutral-200 p-6 mb-8">
+                <div className="flex flex-col items-center">
+                  <Wallet className="h-16 w-16 text-blue-500 mb-4" />
+                  <h3 className="text-xl font-medium text-neutral-900 mb-2">Creating your wallet...</h3>
+                  <p className="text-neutral-600 text-center">
+                    Please wait while we set up your Web3 wallet.
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {hasWallet && (
+              <div className="bg-white rounded-xl shadow-sm border border-neutral-200 overflow-hidden mb-8">
+                <div className="p-6">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between mb-6">
+                    <div>
+                      <h2 className="text-lg font-medium text-neutral-900">Welcome back!</h2>
+                      <p className="text-neutral-600">Check in daily to earn points and climb the leaderboard</p>
                     </div>
                     
-                    <div className="bg-neutral-100 px-3 py-1 rounded-full flex items-center">
-                      <Coins className="h-4 w-4 mr-1 text-orange-500" />
-                      <span className="text-neutral-800">{userData?.points || 0} points</span>
+                    <div className="mt-4 md:mt-0 flex items-center space-x-2 text-sm">
+                      <div className="bg-neutral-100 px-3 py-1 rounded-full flex items-center">
+                        <Wallet className="h-4 w-4 mr-1 text-neutral-600" />
+                        <span className="text-neutral-800">
+                          {walletAddress ? 
+                            `${walletAddress.slice(0, 4)}...${walletAddress.slice(-4)}` : 
+                            'No wallet'}
+                        </span>
+                      </div>
+                      
+                      <div className="bg-neutral-100 px-3 py-1 rounded-full flex items-center">
+                        <Coins className="h-4 w-4 mr-1 text-orange-500" />
+                        <span className="text-neutral-800">{userData?.points || 0} points</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-                
-                <div className="bg-neutral-50 rounded-lg p-6 mb-6">
-                  <div className="flex flex-col items-center">
-                    {checkedInToday ? (
-                      <>
-                        <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
-                        <h3 className="text-xl font-medium text-neutral-900 mb-2">You&apos;ve checked in today!</h3>
-                        <p className="text-neutral-600 text-center">
-                          Great job! Come back tomorrow to continue your streak.
-                        </p>
-                        {pointsEarned > 0 && (
-                          <div className="mt-4 bg-green-50 border border-green-100 text-green-800 px-4 py-2 rounded-lg">
-                            You earned {pointsEarned} points today!
-                          </div>
-                        )}
-                        <div className="mt-4 bg-white px-4 py-2 rounded-full text-sm flex items-center">
-                          <Clock className="h-4 w-4 mr-2 text-neutral-500" />
-                          <span>Next check-in available tomorrow</span>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <CircleAlert className="h-16 w-16 text-orange-500 mb-4" />
-                        <h3 className="text-xl font-medium text-neutral-900 mb-2">Ready to check in?</h3>
-                        <p className="text-neutral-600 text-center mb-6">
-                          Sign with your wallet to confirm your daily check-in and earn points.
-                        </p>
-                        <button
-                          onClick={handleDailyCheckIn}
-                          disabled={isCheckingIn || !publicKey}
-                          className="bg-neutral-900 text-white py-3 px-6 rounded-lg flex items-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-800 transition-colors"
-                        >
-                          {isCheckingIn ? (
-                            <>
-                              <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
-                              Signing...
-                            </>
-                          ) : (
-                            <>
-                              <CalendarCheck className="h-5 w-5 mr-2" />
-                              Check In Now
-                            </>
+                  
+                  <div className="bg-neutral-50 rounded-lg p-6 mb-6">
+                    <div className="flex flex-col items-center">
+                      {checkedInToday ? (
+                        <>
+                          <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
+                          <h3 className="text-xl font-medium text-neutral-900 mb-2">You&apos;ve checked in today!</h3>
+                          <p className="text-neutral-600 text-center">
+                            Great job! Come back tomorrow to continue your streak.
+                          </p>
+                          {pointsEarned > 0 && (
+                            <div className="mt-4 bg-green-50 border border-green-100 text-green-800 px-4 py-2 rounded-lg">
+                              You earned {pointsEarned} points today!
+                            </div>
                           )}
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="bg-neutral-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-neutral-600 mb-1">Current Streak</h4>
-                    <div className="text-2xl font-bold text-neutral-900 flex items-center">
-                      {userData?.streak || 0} {userData?.streak === 1 ? 'day' : 'days'}
+                          <div className="mt-4 bg-white px-4 py-2 rounded-full text-sm flex items-center">
+                            <Clock className="h-4 w-4 mr-2 text-neutral-500" />
+                            <span>Next check-in available tomorrow</span>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <CircleAlert className="h-16 w-16 text-orange-500 mb-4" />
+                          <h3 className="text-xl font-medium text-neutral-900 mb-2">Ready to check in?</h3>
+                          <p className="text-neutral-600 text-center mb-6">
+                            Sign with your wallet to confirm your daily check-in and earn points.
+                          </p>
+                          <button
+                            onClick={handleDailyCheckIn}
+                            disabled={isCheckingIn || !hasWallet}
+                            className="bg-neutral-900 text-white py-3 px-6 rounded-lg flex items-center disabled:opacity-50 disabled:cursor-not-allowed hover:bg-neutral-800 transition-colors"
+                          >
+                            {isCheckingIn ? (
+                              <>
+                                <RefreshCw className="h-5 w-5 mr-2 animate-spin" />
+                                Signing...
+                              </>
+                            ) : (
+                              <>
+                                <CalendarCheck className="h-5 w-5 mr-2" />
+                                Check In Now
+                              </>
+                            )}
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   
-                  <div className="bg-neutral-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-neutral-600 mb-1">Last Check-in</h4>
-                    <div className="text-lg font-medium text-neutral-900">
-                      {userData?.lastCheckIn 
-                        ? new Date(userData.lastCheckIn).toLocaleDateString() 
-                        : 'Never'}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="bg-neutral-50 p-4 rounded-lg">
+                      <h4 className="text-sm font-medium text-neutral-600 mb-1">Current Streak</h4>
+                      <div className="text-2xl font-bold text-neutral-900 flex items-center">
+                        {userData?.streak || 0} {userData?.streak === 1 ? 'day' : 'days'}
+                      </div>
                     </div>
-                  </div>
-                  
-                  <div className="bg-neutral-50 p-4 rounded-lg">
-                    <h4 className="text-sm font-medium text-neutral-600 mb-1">Total Points</h4>
-                    <div className="text-2xl font-bold text-neutral-900 flex items-center">
-                      {userData?.points || 0}
-                      <Coins className="h-5 w-5 ml-1 text-orange-500" />
+                    
+                    <div className="bg-neutral-50 p-4 rounded-lg">
+                      <h4 className="text-sm font-medium text-neutral-600 mb-1">Last Check-in</h4>
+                      <div className="text-lg font-medium text-neutral-900">
+                        {userData?.lastCheckIn 
+                          ? new Date(userData.lastCheckIn).toLocaleDateString() 
+                          : 'Never'}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-neutral-50 p-4 rounded-lg">
+                      <h4 className="text-sm font-medium text-neutral-600 mb-1">Total Points</h4>
+                      <div className="text-2xl font-bold text-neutral-900 flex items-center">
+                        {userData?.points || 0}
+                        <Coins className="h-5 w-5 ml-1 text-orange-500" />
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
-            </div>
+            )}
             
             <div className="bg-white rounded-xl shadow-sm border border-neutral-200 p-6">
               <h2 className="text-lg font-medium text-neutral-900 mb-4">About Daily Check-ins</h2>

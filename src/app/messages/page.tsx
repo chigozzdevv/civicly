@@ -83,7 +83,8 @@ export default function MessagesPage() {
       });
       
       if (response.ok) {
-        const data = await response.json();
+        await response.json();
+
         
         // Refresh messages
         const messagesResponse = await fetch('/api/messages');
