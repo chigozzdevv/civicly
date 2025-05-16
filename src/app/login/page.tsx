@@ -15,12 +15,7 @@ export default function LoginPage() {
   useEffect(() => {
     if (user) {
       setIsRedirecting(true);
-      
-      const redirectTimeout = setTimeout(() => {
-        router.push('/dashboard');
-      }, 1000);
-      
-      return () => clearTimeout(redirectTimeout);
+      router.push('/dashboard');
     }
   }, [user, router]);
 
