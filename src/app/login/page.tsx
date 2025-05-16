@@ -11,12 +11,28 @@ export default function LoginPage() {
   const router = useRouter();
   const { user } = useUser();
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [redirectTime, setRedirectTime] = useState(0);
 
   useEffect(() => {
+    let redirectTimeout: ReturnType<typeof setTimeout> | undefined;
+    let redirectTimer: ReturnType<typeof setInterval> | undefined;
+
     if (user) {
       setIsRedirecting(true);
-      router.push('/dashboard');
+      
+      redirectTimer = setInterval(() => {
+        setRedirectTime(prev => Math.min(prev + 1, 100));
+      }, 50);
+      
+      redirectTimeout = setTimeout(() => {
+        router.push('/dashboard');
+      }, 1000);
     }
+    
+    return () => {
+      if (redirectTimeout) clearTimeout(redirectTimeout);
+      if (redirectTimer) clearInterval(redirectTimer);
+    };
   }, [user, router]);
 
   return (
@@ -47,14 +63,13 @@ export default function LoginPage() {
               >
                 <RefreshCw className="h-6 w-6 text-green-600 animate-spin" />
               </motion.div>
-              <h2 className="text-xl font-medium text-neutral-900">Authentication successful!</h2>
-              <p className="text-neutral-600 mt-2">Redirecting you to dashboard...</p>
+              <h2 className="text-xl font-medium text-neutral-900">You're authenticated!</h2>
+              <p className="text-neutral-600 mt-2">Connecting to your dashboard now...</p>
+              <p className="text-sm text-neutral-500 mt-1">Web3 connections can take a moment to establish securely</p>
               <div className="w-full bg-neutral-100 h-1.5 rounded-full mt-6 overflow-hidden">
                 <motion.div 
                   className="h-full bg-orange-500 rounded-full"
-                  initial={{ width: 0 }}
-                  animate={{ width: "100%" }}
-                  transition={{ duration: 1 }}
+                  style={{ width: `${redirectTime}%` }}
                 />
               </div>
             </div>
@@ -66,6 +81,7 @@ export default function LoginPage() {
                 </div>
                 <h1 className="text-2xl font-bold text-neutral-900">Welcome to Civicly</h1>
                 <p className="text-neutral-600 mt-2">Sign in to continue to your account</p>
+                <p className="text-xs text-neutral-500 mt-1">Authentication may take a moment to complete</p>
               </div>
               
               <div className="flex justify-center mb-8">
