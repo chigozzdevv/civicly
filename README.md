@@ -2,7 +2,7 @@
 
 Civicly is a platform that demonstrates the power of Civic Auth - a decentralized authentication and user management solution with embedded Solana and Ethereum/EVM wallets. Users can sign in, earn points through daily check-ins, stake points, and interact with other users on a message board.
 
-## 📑 Contents
+## Contents
 
 - [Features](#features)
 - [Live Demo](#live-demo)
@@ -12,7 +12,7 @@ Civicly is a platform that demonstrates the power of Civic Auth - a decentralize
 - [Key Components](#key-components)
 - [Getting Civic Auth Credentials](#getting-civic-auth-credentials)
 
-## ✨ Features
+## Features
 
 - **Web3 Authentication**: Sign in using Google, Discord, or GitHub through Civic Auth
 - **Embedded Wallets**: Automatically creates Solana and Ethereum wallets for users
@@ -22,11 +22,11 @@ Civicly is a platform that demonstrates the power of Civic Auth - a decentralize
 - **Message Board**: Send and view messages from other users (with cryptographic signing)
 - **Wallet Management**: View your wallet balance and transaction history
 
-## 🌐 Live Demo
+## Live Demo
 
 Visit [civicly.vercel.app](https://civicly.vercel.app) to see the platform in action.
 
-## 📸 Screenshots
+## Screenshots
 
 ### Home Page
 ![Home Page](./public/readme-images/hero.png)
@@ -38,7 +38,6 @@ Visit [civicly.vercel.app](https://civicly.vercel.app) to see the platform in ac
 
 ### Dashboard
 ![Dashboard](./public/readme-images/dashboard-1of2.png)
-![Dashboard](./public/readme-images/dashboard-2of2.png)
 
 ### Wallet Page
 ![Wallet Page](./public/readme-images/wallets.png)
@@ -52,21 +51,23 @@ Visit [civicly.vercel.app](https://civicly.vercel.app) to see the platform in ac
 ### Message Board
 ![Message Board](./public/readme-images/message-board.png)
 
-## 🚀 How to Use Civicly
+## How to Use Civicly
 
 1. Visit [civicly.vercel.app](https://civicly.vercel.app)
 2. Click on either "Try Civicly Now", "Login", or "Get Started" button
 3. Choose your preferred authentication method (Google, Discord, or GitHub)
 4. Complete the authentication process (you may receive a verification code by email)
 5. Once logged in, you'll see your dashboard with your points and daily check-in status
+
 6. Navigate through the sidebar to access different features:
+
    - **Dashboard**: View your points, leaderboard rank, and check in daily
    - **My Wallet**: Manage your Solana and Ethereum wallets, send and receive crypto
    - **Message Board**: Post messages and see what others have shared
    - **Staking**: Stake your points to earn interest
    - **Leaderboard**: See how you rank compared to other users
 
-## 💻 Developer Setup
+## Developer Setup
 
 To set up Civicly locally for development:
 
@@ -105,7 +106,7 @@ To set up Civicly locally for development:
 
 6. Open [http://localhost:3000](http://localhost:3000) in your browser
 
-## 🔑 Key Components
+## Key Components
 
 ### Auth Components
 
@@ -210,7 +211,7 @@ export default function RootLayout({ children }) {
 }
 ```
 
-## 🔐 Getting Civic Auth Credentials
+## Getting Civic Auth Credentials
 
 1. Visit [auth.civic.com](https://auth.civic.com/)
 2. Create an account or sign in
@@ -221,12 +222,16 @@ export default function RootLayout({ children }) {
 7. Add this Client ID to your project's `.env` file as `NEXT_PUBLIC_CIVIC_CLIENT_ID`
 
 From the Civic dashboard, you can:
+
 - Monitor user activity
+
+![Users](./public/readme-images/user-activity-civic-auth.png)
+
 - Manage application settings
 - View analytics for your authentication service
 - Configure additional authentication providers
 
-## ⚠️ Important Notes
+## Important Notes
 
 - This application requires a Helius API key for Solana RPC access
 - Make sure to set up your database properly with Prisma
